@@ -44,8 +44,7 @@ internal class ScannerTest {
   @Test
   fun emptyPlaylistFile() {
     val scanner = Scanner("#EXTM3U")
-    assertTrue { scanner.next() is HashToken }
-    assertTrue { scanner.next() is IdentifierToken }
+    assertTrue { scanner.next() is TagToken }
     assertTrue { scanner.next() is EofToken }
     assertThrows<EofScannerException> { scanner.next() }
   }
@@ -53,10 +52,22 @@ internal class ScannerTest {
   @Test
   fun emptyPlaylistFileWithEol() {
     val scanner = Scanner("#EXTM3U\n")
-    assertTrue { scanner.next() is HashToken }
-    assertTrue { scanner.next() is IdentifierToken }
+    assertTrue { scanner.next() is TagToken }
     assertTrue { scanner.next() is EolToken }
     assertTrue { scanner.next() is EofToken }
     assertThrows<EofScannerException> { scanner.next() }
   }
-}
+
+  @Test
+  fun quotedString() {
+    val scanner = Scanner("\"XXX\"")
+    assertTrue { scanner.next() is QuotedStringToken }
+    assertTrue { scanner.next() is EofToken }
+    assertThrows<EofScannerException> { scanner.next() }
+  }
+
+  @Test
+  fun quotedStringUnterminated() {
+    val scanner = Scanner("\"XXX")
+    assertThrows<UnexpectedEofScannerException> { scanner.next() }
+  }}
