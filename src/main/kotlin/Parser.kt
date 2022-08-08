@@ -1,4 +1,5 @@
 import io.ktor.util.collections.*
+import java.text.DecimalFormat
 
 class Parser (val scanner : Scanner) {
   var current : Token = EofToken(-1)
@@ -28,8 +29,12 @@ class Parser (val scanner : Scanner) {
     return token
   }
 
+  private fun isEol() : Boolean {
+    return current is EolToken
+  }
+
   private fun expectEol() {
-    if (current !is EolToken) {
+    if (!isEol()) {
       throw ParserException()
     }
     current = scanner.next()
@@ -73,18 +78,29 @@ class Parser (val scanner : Scanner) {
     return token.value;
   }
 
+  private fun expectNumber() : Long {
+    val token = current
+    if (token !is NumberToken) {
+      throw ParserException()
+    }
+    current = scanner.next()
+    return token.longValue();
+  }
+
   private fun expectHeader() {
     expectTag("EXTM3U")
     expectEolOrEof()
   }
 
-  private fun expectKV() {
+  private fun expectKV(consume : (key : String, value : Token) -> Unit) {
     while (current !is EolToken && current !is EofToken) {
       if (current !is IdentifierToken) {
         throw ParserException()
       }
+      val key = current.content
       current = scanner.next()
       expectEquals()
+      consume.invoke(key, current)
       current = scanner.next()
       if (current is CommaToken) {
         expectComma()
@@ -99,10 +115,16 @@ class Parser (val scanner : Scanner) {
     val builder = MasterPlaylist.Builder()
     current = scanner.next()
     expectHeader()
-    while (true) {
+    while (current !is EofToken) {
+      // Empty lines are allowed, https://datatracker.ietf.org/doc/html/rfc8216#section-4.1 second paragraph.
+      if (isEol()) {
+        expectEol()
+        continue
+      }
       val tag = expectTag()
       when (tag.identifier) {
         "EXT-X-INDEPENDENT-SEGMENTS" -> {
+          builder.independentSegments = true
           expectEolOrEof()
         }
         "EXT-X-VERSION" -> {
@@ -112,11 +134,75 @@ class Parser (val scanner : Scanner) {
         }
         "EXT-X-MEDIA" -> {
           expectColon()
-          expectKV()
+          expectKV() { _, _ -> }
         }
         "EXT-X-STREAM-INF" -> {
           expectColon()
-          expectKV()
+          val variantStreamBuilder = VariantStream.Builder()
+          expectKV() { k, v ->
+            when (k) {
+              "BANDWIDTH" -> {
+                if (v is IntToken) {
+                  variantStreamBuilder.bandwidth(v.value)
+                }
+              }
+              "AVERAGE-BANDWIDTH" -> {
+                if (v is IntToken) {
+                  variantStreamBuilder.averageBandwidth(v.value)
+                }
+              }
+              "CODECS" -> {
+                if (v is IdentifierToken) {
+                  variantStreamBuilder.codecs(v.content)
+                }
+              }
+              "RESOLUTION" -> {
+                if (v is ResolutionToken) {
+                  variantStreamBuilder.resolution(v)
+                }
+              }
+              "FRAME-RATE" -> {
+                if (v is DoubleToken) {
+                  variantStreamBuilder.frameRate(v.value)
+                }
+              }
+              "HDCP-LEVEL" -> {
+                if (v is IdentifierToken) {
+                  variantStreamBuilder.hdcpLevel(v.content)
+                }
+              }
+              "AUDIO" -> {
+                if (v is IdentifierToken) {
+                  variantStreamBuilder.audio(v.content)
+                }
+              }
+              "VIDEO" -> {
+                if (v is IdentifierToken) {
+                  variantStreamBuilder.video(v.content)
+                }
+              }
+              "SUBTITLES" -> {
+                if (v is IdentifierToken) {
+                  variantStreamBuilder.subtitles(v.content)
+                }
+              }
+              "CLOSED-CAPTIONS" -> {
+                if (v is IdentifierToken) {
+                  variantStreamBuilder.closedCaptions(v.content)
+                }
+              }
+              else -> {
+                // Ignore
+              }
+            }
+          }
+          variantStreamBuilder.uri = expectUrl().url
+          builder.addVariantStream(variantStreamBuilder.build())
+          expectEolOrEof()
+        }
+        "EXT-X-I-FRAME-STREAM-INF" -> {
+          expectColon()
+          expectKV() { _, _ -> }
         }
         else -> throw ParserException()
       }
@@ -135,6 +221,11 @@ class Parser (val scanner : Scanner) {
     current = scanner.next()
     expectHeader()
     while (current !is EofToken) {
+      // Empty lines are allowed, https://datatracker.ietf.org/doc/html/rfc8216#section-4.1 second paragraph.
+      if (isEol()) {
+        expectEol()
+        continue
+      }
       val tag = expectTag()
       when (tag.identifier) {
         "EXT-X-TARGETDURATION" -> {
@@ -170,11 +261,22 @@ class Parser (val scanner : Scanner) {
         }
         "EXT-X-MEDIA" -> {
           expectColon()
-          expectKV()
+          expectKV() { _, _ -> }
         }
         "EXT-X-STREAM-INF" -> {
           expectColon()
-          expectKV()
+          expectKV() { _, _ -> }
+          expectUrl()
+          expectEolOrEof()
+        }
+        "EXT-X-INDEPENDENT-SEGMENTS" -> {
+          // TODO.
+          expectEolOrEof()
+        }
+        "EXT-X-MAP" -> {
+          // TODO.
+          expectColon()
+          expectKV() { _, _ -> }
         }
         "EXTINF" -> {
           expectColon()
@@ -185,6 +287,20 @@ class Parser (val scanner : Scanner) {
           // TODO check title
           //  current = scanner.next();
           expectEolOrEof()
+          if (current is TagToken) {
+            val tag = expectTag()
+            when (tag.identifier ) {
+              "EXT-X-BYTERANGE" -> {
+                expectColon()
+                expectNumber()
+                if (current is AtToken) {
+                  current = scanner.next()
+                  expectNumber()
+                }
+                expectEolOrEof()
+              } else -> throw ParserException()
+            }
+          }
           builder.addSegemnt(expectUrl().url)
           expectEolOrEof()
         }
@@ -201,15 +317,61 @@ class Parser (val scanner : Scanner) {
 }
 
 class MasterPlaylist private constructor(
-  val version : Int?) {
+  val version : Int?,
+  val independentSegments : Boolean?) {
 
 
   data class Builder(
-    var version : Int? = null) {
+    var version : Int? = null,
+    var independentSegments : Boolean? = null,
+    val variantStreams: MutableList<VariantStream> = arrayListOf()
+  ) {
 
     fun version(version : Int) = apply { this.version = version }
-    fun build() = MasterPlaylist(version)
+    fun independentSegments(independentSegments : Boolean) = apply { this.independentSegments = independentSegments }
+    fun addVariantStream(variantStream : VariantStream) { variantStreams.add(variantStream) }
+    fun build() = MasterPlaylist(version, independentSegments)
 
+  }
+}
+
+class VariantStream private constructor(
+  val bandwidth : Int,
+  val averageBandwidth : Int?,
+  val codecs : String?,
+  val resolution : String?,
+  val frameRate : Double?,
+  val hdcpLevel : String?,
+  val audio : String?,
+  val video : String?,
+  val subtitles : String?,
+  val closedCaptions : String?,
+  val uri : String,
+) {
+  data class Builder(
+    var bandwidth : Int? = null,
+    var averageBandwidth : Int? = null,
+    var codecs : String? = null,
+    var resolution : String? = null,
+    var frameRate : Double? = null,
+    var hdcpLevel : String? = null,
+    var audio : String? = null,
+    var video : String? = null,
+    var subtitles : String? = null,
+    var closedCaptions : String? = null,
+    var uri : String? = null,
+  ) {
+    fun bandwidth(bandwidth : Int) = apply { this.bandwidth = bandwidth }
+    fun averageBandwidth(averageBandwidth : Int) = apply { this.averageBandwidth = averageBandwidth }
+    fun codecs(codecs : String) = apply { this.codecs = codecs }
+    fun resolution(resolution : ResolutionToken) = apply { this.resolution = resolution.content }
+    fun frameRate(frameRate : Double) = apply { this.frameRate = frameRate }
+    fun hdcpLevel(hdcpLevel : String) = apply { this.hdcpLevel = hdcpLevel }
+    fun audio(audio : String) = apply { this.audio = audio }
+    fun video(video : String) = apply { this.video = video }
+    fun subtitles(subtitles : String) = apply { this.subtitles = subtitles }
+    fun closedCaptions(closedCaptions : String) = apply { this.closedCaptions = closedCaptions }
+    fun build() = VariantStream(bandwidth!!, averageBandwidth, codecs, resolution, frameRate, hdcpLevel, audio, video, subtitles, closedCaptions, uri!!)
   }
 }
 

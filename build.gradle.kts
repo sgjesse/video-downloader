@@ -22,6 +22,7 @@ dependencies {
     implementation("io.ktor:ktor-client-cio:$ktor_version")
 
     testImplementation(kotlin("test"))
+    testImplementation("com.google.truth:truth:1.1.3")
 }
 
 tasks.test {

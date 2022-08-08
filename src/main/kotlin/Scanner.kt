@@ -132,13 +132,22 @@ open class ScannerBase(protected val source : String, protected val x : Map<Char
           }
           return DoubleToken(start, pos, source.substring(start, pos).toDouble());
         }
-        if (isIdentifierChar(pos)) {
-          while (isLetterOrDigitChar(pos)) {
+        if (source[pos] == 'x') {
+          val width = source.substring(start, pos).toInt()
+          val heightStart = ++pos
+          while (isDigitChar(pos)) {
             pos++
           }
-          return IdentifierToken(start, pos, source.substring(start, pos))
+          val height = source.substring(heightStart, pos).toInt()
+          return ResolutionToken(start, pos, width, height);
         }
-        return IntToken(start, pos, source.substring(start, pos).toInt());
+        val number = source.substring(start, pos)
+        val intValue = number.toIntOrNull()
+        return if (intValue != null) {
+          IntToken(start, pos, intValue)
+        } else {
+          LongToken(start, pos, source.substring(start, pos).toLong())
+        }
       } else {
         throw RuntimeException("Unexpected token " + source[pos])
       }
@@ -152,7 +161,8 @@ class Scanner(source: String) : ScannerBase(
     '#' to ::HashToken,
     ':' to ::ColonToken,
     '=' to ::EqualsToken,
-    ',' to ::CommaToken))
+    ',' to ::CommaToken,
+    '@' to ::AtToken))
 
 open class ScannerException : Exception()
 class EofScannerException : ScannerException()
