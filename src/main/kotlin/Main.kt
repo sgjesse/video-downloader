@@ -41,6 +41,8 @@ ffmpeg -f concat -i long-filelist-subs.txt long.vtt
 # Combine the TS files into one adding subtitles
 ffmpeg -f concat -i filelist.txt -vf subtitles=long.vtt long-low-subs.mp4
 
+ffmpeg -i video.mp4 -i audio.mp4 -c:v copy -c:a copy output.mp4
+
 ffmpeg -ss 00:04:24 -to 00:05:55 -i long-low-subs.mp4 -c copy cut.mp4
  */
 suspend fun main(args: Array<String>) {

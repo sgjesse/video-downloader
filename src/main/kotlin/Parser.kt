@@ -1,6 +1,3 @@
-import io.ktor.util.collections.*
-import java.text.DecimalFormat
-
 class Parser (val scanner : Scanner) {
   var current : Token = EofToken(-1)
 
